@@ -1,0 +1,30 @@
+# Participativní rozpočet — Python CGI
+
+Tři české stránky: `index.cgi` pro mobilní hlasování, `admin.cgi` pro správu a `results.cgi` pro projektor. Rozpočet každého hlasujícího je přesně 4 000 000 EUR, rozdělovaný po 1 000 000 EUR. Výsledky se obnovují každých 5 sekund.
+
+Python 3.9+ na Linuxu/Unixu, pouze standardní knihovna. Žádná databáze, framework, instalace balíčků ani vlastní naslouchající port. CGI spouští stávající webový server.
+
+## Nasazení na hosting s CGI
+
+1. Nahrajte celý projekt. Webový kořen nasměrujte **výhradně na adresář `public/`**. Složky `src/`, `bin/` a `storage/` musí zůstat mimo veřejný webový kořen.
+2. Povolte Python CGI. U Apache je potřeba `mod_cgi`/`mod_cgid`, `Options +ExecCGI` a `AddHandler cgi-script .cgi`. Přiložený `public/.htaccess` funguje, pokud hosting dovoluje příslušné direktivy (`AllowOverride Options FileInfo Indexes`). Při konfiguraci přes správce serveru nastavte stejná pravidla v konfiguraci. Některé hostingy vyžadují adresář `cgi-bin`; v takovém případě nastavte tento adresář jako veřejný adresář aplikace a zachovejte sourozenecké `src/` a `storage/`, případně upravte cestu v CGI souborech. Statické `assets/` musí server také obsluhovat.
+3. Soubory `public/*.cgi` musí být spustitelné (`chmod 755 public/*.cgi`) a mít unixové konce řádků. První řádek je `#!/usr/bin/env python3`; pokud hosting vyžaduje přesnou cestu, změňte jej například na `#!/usr/bin/python3`.
+4. Spusťte `python3 bin/setup.py` a zadejte heslo správce dvakrát (minimálně 12 znaků). To lze provést i lokálně a následně bezpečně nahrát vytvořený `storage/config.json`. Heslo se ukládá jako PBKDF2 hash. Konfigurační soubor obsahuje také tajný klíč; nezveřejňujte jej.
+5. Uživatel, pod kterým běží CGI, potřebuje čtení konfigurace a čtení/zápis do `storage/`. Setup vytváří konfiguraci s oprávněním 600, takže musí běžet pod stejným uživatelem jako CGI, nebo správce musí nastavit vlastnictví a přístup příslušné skupiny. Nepoužívejte veřejný zápis 777. Alternativní úložiště nastavíte proměnnou prostředí `BUDGET_STORAGE` (stejně pro setup i CGI).
+6. Otevřete `admin.cgi`, přihlaste se a vložte projekty, každý na samostatný řádek. Sdílejte `index.cgi` s účastníky a promítejte `results.cgi`. Používejte HTTPS.
+
+Po prvním hlasu je seznam projektů uzamčený. Zahájení nového kola vymaže předchozí hlasy a umožní znovu hlasovat. Před resetem si udělejte zálohu. Změna hesla opětovným spuštěním setupu také vymění podpisový klíč a zneplatní cookies; dělejte ji mezi koly, protože tím lze znovu hlasovat s novou identitou.
+
+## Ukládání a omezení
+
+`storage/state.json` obsahuje projekty a anonymní rozdělení hlasů. Souběžné požadavky chrání `flock` na samostatném souboru; zápis probíhá přes dočasný soubor a atomické přejmenování. Použijte lokální disk s podporou těchto operací, nikoli sdílené úložiště bez spolehlivého zamykání. Zálohujte `state.json` i `config.json`; při kopírování za provozu je nutné respektovat `state.lock`, nebo na chvíli zastavit hlasování.
+
+Omezení jednoho hlasu za kolo je založené na podepsané cookie prohlížeče, nikoli na ověření osoby. Smazání cookies či jiný prohlížeč umožní další hlas. Pro závazné veřejné volby by bylo nutné přidat individuální hlasovací kódy nebo přihlášení. Administrace používá heslo, podepsanou cookie s platností 8 hodin a CSRF ochranu. Při veřejném provozu lze na webserveru přidat omezení pokusů o přihlášení.
+
+Součty na projektoru jsou součtem všech přidělených peněz: při 10 hlasech tedy 40 milionů EUR. Procenta ukazují podíl projektu na tomto součtu.
+
+## Ověření
+
+`python3 -m unittest discover -s tests -v`
+
+Testy spouštějí CGI přímo s CGI proměnnými prostředí a izolovaným dočasným úložištěm; nepotřebují server ani port. Ověření skutečné konfigurace CGI na cílovém hostingu je potřeba provést po nasazení.
