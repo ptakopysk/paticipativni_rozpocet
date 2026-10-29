@@ -24,9 +24,9 @@ class AppTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def request(self, route, form=None, cookie=None):
+    def request(self, route, form=None, cookie=None, query=''):
         body = urlencode(form or {}).encode()
-        env = dict(os.environ, BUDGET_STORAGE=str(self.store), SCRIPT_NAME='/budget/' + route + '.cgi', REQUEST_METHOD='POST' if form is not None else 'GET', CONTENT_LENGTH=str(len(body)), HTTP_COOKIE=self.cookie if cookie is None else cookie)
+        env = dict(os.environ, BUDGET_STORAGE=str(self.store), SCRIPT_NAME='/budget/' + route + '.cgi', REQUEST_METHOD='POST' if form is not None else 'GET', CONTENT_LENGTH=str(len(body)), HTTP_COOKIE=self.cookie if cookie is None else cookie, QUERY_STRING=query)
         proc = subprocess.run(['python3', str(ROOT / 'public' / (route + '.cgi'))], input=body, env=env, capture_output=True, check=True)
         headers, content = proc.stdout.decode().split('\r\n\r\n', 1)
         return headers, content
@@ -95,6 +95,29 @@ class AppTests(unittest.TestCase):
         headers, content = self.request('index')
         self.assertIn('503 Service Unavailable', headers)
         self.assertIn('setup.py', content)
+
+    def test_assets_work_without_config_and_reject_other_files(self):
+        (self.store / 'config.json').unlink()
+        for filename, mime in [('style.css', 'text/css'), ('app.js', 'application/javascript')]:
+            headers, content = self.request('assets', query='file=' + filename)
+            self.assertIn('200 OK', headers)
+            self.assertIn(mime, headers)
+            self.assertTrue(content)
+        headers, _ = self.request('assets', query='file=../storage/config.json')
+        self.assertIn('404 Not Found', headers)
+
+    def test_corrupt_storage_has_specific_diagnostic(self):
+        (self.store / 'state.json').write_text('{broken')
+        headers, content = self.request('api')
+        self.assertIn('503 Service Unavailable', headers)
+        self.assertIn('Soubor s hlasy je poškozený', json.loads(content)['error'])
+        self.assertEqual((self.store / 'state.json').read_text(), '{broken')
+
+    def test_corrupt_configuration_has_specific_diagnostic(self):
+        (self.store / 'config.json').write_text('{}')
+        headers, content = self.request('api')
+        self.assertIn('503 Service Unavailable', headers)
+        self.assertIn('Konfigurace úložiště je poškozená', json.loads(content)['error'])
 
 
 if __name__ == '__main__':

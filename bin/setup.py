@@ -21,4 +21,6 @@ fd, name = tempfile.mkstemp(dir=store, prefix='config-')
 with os.fdopen(fd, 'w') as out:
     json.dump(config, out)
 os.replace(name, store / 'config.json')
-print('Hotovo. Otevřete admin.cgi. Uživatel CGI musí mít právo číst a zapisovat do úložiště.')
+print(f'Hotovo. Úložiště: {store.resolve()}')
+print(f'Setup běžel jako UID {os.geteuid()}. Konfigurace má práva 600; jiný uživatel CGI ji bez úpravy vlastníka nebo práv nepřečte.')
+print('Ověření: python3 bin/check.py. Otevřete admin.cgi.')

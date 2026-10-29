@@ -1,5 +1,4 @@
 """Participatory budgeting, standard-library CGI application (Python 3.9+)."""
-import base64
 import fcntl
 import hashlib
 import hmac
@@ -11,11 +10,32 @@ import secrets
 import sys
 import tempfile
 import time
+import traceback
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs
 
 ROOT = Path(__file__).resolve().parent.parent
 STORE = Path(os.environ.get('BUDGET_STORAGE', str(ROOT / 'storage')))
+
+
+class StorageError(Exception):
+    pass
+
+
+def load_config():
+    try:
+        config = json.loads((STORE / 'config.json').read_text())
+        if any(not isinstance(config.get(key), str) for key in ('secret', 'salt', 'password')):
+            raise ValueError('Invalid configuration fields')
+        if any(len(bytes.fromhex(config[key])) != size for key, size in (('secret', 32), ('salt', 16), ('password', 32))):
+            raise ValueError('Invalid configuration lengths')
+        return config
+    except FileNotFoundError as exc:
+        raise StorageError('Chybí konfigurace úložiště. Spusťte python3 bin/setup.py; setup i CGI musí používat stejnou složku BUDGET_STORAGE.') from exc
+    except PermissionError as exc:
+        raise StorageError('CGI nemá právo číst konfiguraci úložiště. Ověřte vlastníka a oprávnění storage/config.json i nadřazených složek.') from exc
+    except (ValueError, TypeError) as exc:
+        raise StorageError('Konfigurace úložiště je poškozená. Obnovte storage/config.json ze zálohy.') from exc
 
 
 def escape(value):
@@ -27,6 +47,19 @@ def initial():
 
 
 def transaction(callback, write=False):
+    try:
+        return storage_transaction(callback, write)
+    except PermissionError as exc:
+        raise StorageError('CGI nemá právo přistupovat k datům nebo zapisovat do úložiště. Ověřte vlastníka a oprávnění složky storage a souborů state.lock a state.json.') from exc
+    except FileNotFoundError as exc:
+        raise StorageError('Složka úložiště neexistuje. Ověřte BUDGET_STORAGE v prostředí CGI a setupu.') from exc
+    except json.JSONDecodeError as exc:
+        raise StorageError('Soubor s hlasy je poškozený. Obnovte storage/state.json ze zálohy; nespouštějte reset hlasování.') from exc
+    except OSError as exc:
+        raise StorageError('Úložiště nelze číst, zamknout nebo zapsat. Ověřte volné místo, práva a podporu zamykání; podrobnosti jsou v chybovém logu serveru.') from exc
+
+
+def storage_transaction(callback, write=False):
     with (STORE / 'state.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX if write else fcntl.LOCK_SH)
         path = STORE / 'state.json'
@@ -56,7 +89,7 @@ def verify_password(password, config):
 
 
 def page(title, body, kind=''):
-    return f'''<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(title)} · Společný rozpočet</title><link rel="stylesheet" href="assets/style.css"><script src="assets/app.js" defer></script></head><body class="{kind}"><header><a class="brand" href="index.cgi"><span class="brand-icon">↗</span> Společný rozpočet</a><nav aria-label="Hlavní navigace"><a href="index.cgi">Hlasování</a><a href="results.cgi">Výsledky</a><a href="admin.cgi">Správa</a></nav></header><main>{body}</main><footer>Participativní rozpočet <span>Společně rozhodujeme o tom, co má smysl.</span></footer></body></html>'''
+    return f'''<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(title)} · Společný rozpočet</title><link rel="stylesheet" href="assets.cgi?file=style.css"><script src="assets.cgi?file=app.js" defer></script></head><body class="{kind}"><header><a class="brand" href="index.cgi"><span class="brand-icon">↗</span> Společný rozpočet</a><nav aria-label="Hlavní navigace"><a href="index.cgi">Hlasování</a><a href="results.cgi">Výsledky</a><a href="admin.cgi">Správa</a></nav></header><main>{body}</main><footer>Participativní rozpočet <span>Společně rozhodujeme o tom, co má smysl.</span></footer></body></html>'''
 
 
 def hidden(name, value):
@@ -97,7 +130,7 @@ def run(route):
     status = '200 OK'
     mime = 'application/json' if route == 'api' else 'text/html'
     try:
-        config = json.loads((STORE / 'config.json').read_text())
+        config = load_config()
         secret = bytes.fromhex(config['secret'])
         cookies = SimpleCookie()
         try:
@@ -198,11 +231,36 @@ def run(route):
     except ValueError as exc:
         status = '400 Bad Request'
         body = json.dumps({'error': str(exc)}, ensure_ascii=False) if route == 'api' else page('Chyba', f'<p class="notice error">{escape(exc)}</p><a href="index.cgi">Zpět na hlasování</a>')
+    except StorageError as exc:
+        print(f'Budget CGI error: {exc}', file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        status = '503 Service Unavailable'
+        message = str(exc)
+        body = json.dumps({'error': message}, ensure_ascii=False) if route == 'api' else page('Nedostupné', f'<p class="notice error">{escape(message)}</p>')
     except Exception as exc:
         print(f'Budget CGI error: {exc}', file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         status = '503 Service Unavailable'
-        message = 'Aplikace není připravena. Správce musí spustit python3 bin/setup.py a ověřit práva úložiště.'
+        message = 'Při zpracování požadavku nastala chyba. Podrobnosti najde správce v chybovém logu webserveru (Budget CGI error).'
         body = json.dumps({'error': message}, ensure_ascii=False) if route == 'api' else page('Nedostupné', f'<p class="notice error">{message}</p>')
     headers.extend([('Status', status), ('Content-Type', mime + '; charset=utf-8'), ('Cache-Control', 'no-store'), ('X-Content-Type-Options', 'nosniff'), ('Referrer-Policy', 'same-origin'), ('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")])
     output = ''.join(f'{key}: {value}\r\n' for key, value in headers) + '\r\n' + body
     sys.stdout.buffer.write(output.encode('utf-8'))
+
+
+def serve_asset():
+    """Serve only the two bundled assets, including under Apache ScriptAlias."""
+    allowed = {'style.css': 'text/css', 'app.js': 'application/javascript'}
+    filename = parse_qs(os.environ.get('QUERY_STRING', '')).get('file', [''])[0]
+    if os.environ.get('REQUEST_METHOD', 'GET') != 'GET':
+        status, mime, body = '405 Method Not Allowed', 'text/plain', b'Method not allowed'
+    elif filename not in allowed:
+        status, mime, body = '404 Not Found', 'text/plain', b'Not found'
+    else:
+        try:
+            body = (ROOT / 'public' / 'assets' / filename).read_bytes()
+            status, mime = '200 OK', allowed[filename]
+        except OSError:
+            status, mime, body = '503 Service Unavailable', 'text/plain', b'Asset unavailable'
+    headers = f'Status: {status}\r\nContent-Type: {mime}; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-cache\r\n\r\n'
+    sys.stdout.buffer.write(headers.encode('ascii') + body)
