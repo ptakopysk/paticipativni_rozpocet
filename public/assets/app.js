@@ -1,22 +1,33 @@
 'use strict';
 const form = document.querySelector('#vote-form');
 if (form) {
+  const budget = Number(form.dataset.budget);
+  const format = value => new Intl.NumberFormat('cs-CZ').format(value);
+  const numbers = Array.from(form.querySelectorAll('.amount-number'));
   const sliders = Array.from(form.querySelectorAll('input[type=range]'));
   const submit = document.querySelector('#submit-vote');
   const update = () => {
     const sum = sliders.reduce((total, slider) => total + Number(slider.value), 0);
     sliders.forEach((slider, i) => {
-      document.querySelector('#value-' + i).textContent = slider.value + ' mil. EUR';
+      numbers[i].value = slider.value;
+      document.querySelector('#value-' + i).textContent = format(Number(slider.value)) + ' mil. EUR';
       slider.setAttribute('aria-valuetext', slider.value + ' milionů EUR');
     });
-    document.querySelector('#allocated').textContent = sum + ' mil. EUR';
-    document.querySelector('#remaining').textContent = (4 - sum) + ' mil. EUR';
-    document.querySelector('#budget-fill').style.width = Math.min(100, sum * 25) + '%';
-    document.querySelector('#budget-status').textContent = sum === 4 ? 'Hotovo! Můžete odeslat svůj hlas.' : sum < 4 ? 'Rozdělte ještě ' + (4 - sum) + ' mil. EUR.' : 'Překročeno o ' + (sum - 4) + ' mil. EUR. Snižte některou částku.';
-    document.querySelector('.budget').classList.toggle('over-budget', sum > 4);
-    submit.disabled = sum !== 4;
+    document.querySelector('#allocated').textContent = format(sum) + ' mil. EUR';
+    document.querySelector('#remaining').textContent = (budget - sum) + ' mil. EUR';
+    document.querySelector('#budget-fill').style.width = Math.min(100, sum / budget * 100) + '%';
+    document.querySelector('#budget-status').textContent = sum === budget ? 'Hotovo! Můžete odeslat svůj hlas.' : sum < budget ? 'Rozdělte ještě ' + (budget - sum) + ' mil. EUR.' : 'Překročeno o ' + (sum - budget) + ' mil. EUR. Snižte některou částku.';
+    document.querySelector('.budget').classList.toggle('over-budget', sum > budget);
+    submit.disabled = sum !== budget;
   };
-  sliders.forEach(slider => slider.addEventListener('input', update));
+  sliders.forEach(slider => {
+    slider.addEventListener('input', update);
+    slider.addEventListener('change', update);
+  });
+  numbers.forEach((input, i) => input.addEventListener('input', () => {
+    if (input.value !== '' && input.validity.valid) { sliders[i].value = input.value; update(); }
+    else submit.disabled = true;
+  }));
   update();
   form.addEventListener('submit', async event => {
     event.preventDefault();
@@ -42,7 +53,7 @@ if (results) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
       document.querySelector('#vote-count').textContent = number.format(data.count);
-      document.querySelector('#total-money').textContent = number.format(data.count * 4) + ' mil. EUR';
+      document.querySelector('#total-money').textContent = number.format(data.total) + ' mil. EUR';
       results.replaceChildren();
       if (!data.items.length) {
         const empty = document.createElement('p');
@@ -51,7 +62,7 @@ if (results) {
         results.append(empty);
       }
       data.items.map((name, i) => ({name, total: data.totals[i], index: i})).sort((a, b) => b.total - a.total || a.index - b.index).forEach((item, rank) => {
-        const share = data.count ? item.total / (data.count * 4) * 100 : 0;
+        const share = data.total ? item.total / data.total * 100 : 0;
         const row = document.createElement('article');
         row.className = 'result-row panel';
         const top = document.createElement('div');

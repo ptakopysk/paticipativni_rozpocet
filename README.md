@@ -1,6 +1,6 @@
 # Participativní rozpočet — Python CGI
 
-Tři české stránky: `index.cgi` pro mobilní hlasování, `admin.cgi` pro správu a `results.cgi` pro projektor. Rozpočet každého hlasujícího je přesně 4 000 000 EUR, rozdělovaný po 1 000 000 EUR. Výsledky se obnovují každých 5 sekund.
+Tři české stránky: `index.cgi` pro mobilní hlasování, `admin.cgi` pro správu a `results.cgi` pro projektor. Rozpočet každého hlasujícího je přesně 4 000 000 000 EUR (4 000 milionů), rozdělovaný po 1 000 000 EUR. Výsledky se obnovují každých 5 sekund.
 
 Python 3.9+ na Linuxu/Unixu, pouze standardní knihovna. Žádná databáze, framework, instalace balíčků ani vlastní naslouchající port. CGI spouští stávající webový server.
 
@@ -21,7 +21,7 @@ Po prvním hlasu je seznam projektů uzamčený. Zahájení nového kola vymaže
 
 Omezení jednoho hlasu za kolo je založené na podepsané cookie prohlížeče, nikoli na ověření osoby. Smazání cookies či jiný prohlížeč umožní další hlas. Pro závazné veřejné volby by bylo nutné přidat individuální hlasovací kódy nebo přihlášení. Administrace používá heslo, podepsanou cookie s platností 8 hodin a CSRF ochranu. Při veřejném provozu lze na webserveru přidat omezení pokusů o přihlášení.
 
-Součty na projektoru jsou součtem všech přidělených peněz: při 10 hlasech tedy 40 milionů EUR. Procenta ukazují podíl projektu na tomto součtu.
+Součty na projektoru jsou součtem všech přidělených peněz: při 10 hlasech tedy 40 miliard EUR. Procenta ukazují podíl projektu na tomto součtu.
 
 ## Ověření
 
@@ -48,3 +48,5 @@ chmod 640 storage/config.json
 Pokud již existují `state.lock` a `state.json`, musí je CGI také umět číst a zapisovat. Je potřeba povolit skupině CGI přístup k těmto konkrétním souborům a průchod nadřazenými adresáři. Nezveřejňujte konfiguraci pomocí `chmod 644` a nenastavujte `777`.
 
 Chyby `exec of .../assets/style.css failed` nebo `.../assets/app.js failed` řeší načítání přes přiložené `assets.cgi`. Nahrajte aktualizovaný `src/app.py` a spustitelný `public/assets.cgi` (755).
+
+Styly a JavaScript se nyní načítají přes existující vstupní skript `index.cgi?asset=app.js&v=4000` (resp. `style.css`), se správným MIME typem a bez závislosti na nasazení nového CGI souboru. Starší `assets.cgi` zůstává kompatibilní. Po přechodu z rozpočtu 4 milionů na 4 miliardy zahajte nové kolo, pokud již obsahuje hlasy. Staré hlasy se automaticky nemažou ani nenásobí. Částky lze také zadat do číselných polí vedle posuvníků.
