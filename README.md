@@ -50,3 +50,7 @@ Pokud již existují `state.lock` a `state.json`, musí je CGI také umět čís
 Chyby `exec of .../assets/style.css failed` nebo `.../assets/app.js failed` řeší načítání přes přiložené `assets.cgi`. Nahrajte aktualizovaný `src/app.py` a spustitelný `public/assets.cgi` (755).
 
 Styly a JavaScript se nyní načítají přes existující vstupní skript `index.cgi?asset=app.js&v=4000` (resp. `style.css`), se správným MIME typem a bez závislosti na nasazení nového CGI souboru. Starší `assets.cgi` zůstává kompatibilní. Po přechodu z rozpočtu 4 milionů na 4 miliardy zahajte nové kolo, pokud již obsahuje hlasy. Staré hlasy se automaticky nemažou ani nenásobí. Částky lze také zadat do číselných polí vedle posuvníků.
+
+### Prohlížeč odmítá JavaScript kvůli MIME typu
+
+Aktuální HTML obsahuje JavaScript přímo na konci stránky, takže jej prohlížeč nemusí načítat samostatným HTTP požadavkem. Každá odpověď obsahuje náhodný CSP nonce, který povoluje pouze vložený skript; `unsafe-inline` není potřeba. Zdroj JavaScriptu zůstává v `public/assets/app.js` a CGI jej načte z disku. Aktualizujte společně `src/app.py` a `public/assets/app.js`. Starší asset endpointy zůstávají kompatibilní. Dokud JavaScript neprovede inicializaci, hlasování zobrazuje diagnostickou zprávu.

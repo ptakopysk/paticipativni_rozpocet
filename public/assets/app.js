@@ -29,6 +29,8 @@ if (form) {
     else submit.disabled = true;
   }));
   update();
+  const warning = document.querySelector('#script-warning');
+  if (warning) warning.hidden = true;
   form.addEventListener('submit', async event => {
     event.preventDefault();
     submit.disabled = true;

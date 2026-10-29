@@ -17,6 +17,7 @@ from urllib.parse import parse_qs
 ROOT = Path(__file__).resolve().parent.parent
 STORE = Path(os.environ.get('BUDGET_STORAGE', str(ROOT / 'storage')))
 BUDGET = 4000  # Millions of EUR
+SCRIPT_NONCE = secrets.token_urlsafe(24)
 
 
 class StorageError(Exception):
@@ -90,7 +91,8 @@ def verify_password(password, config):
 
 
 def page(title, body, kind=''):
-    return f'''<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(title)} · Společný rozpočet</title><link rel="stylesheet" href="index.cgi?asset=style.css&amp;v=4000"><script src="index.cgi?asset=app.js&amp;v=4000" defer></script></head><body class="{kind}"><header><a class="brand" href="index.cgi"><span class="brand-icon">↗</span> Společný rozpočet</a><nav aria-label="Hlavní navigace"><a href="index.cgi">Hlasování</a><a href="results.cgi">Výsledky</a><a href="admin.cgi">Správa</a></nav></header><main>{body}</main><footer>Participativní rozpočet <span>Společně rozhodujeme o tom, co má smysl.</span></footer></body></html>'''
+    script = (ROOT / 'public' / 'assets' / 'app.js').read_text(encoding='utf-8')
+    return f'''<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(title)} · Společný rozpočet</title><link rel="stylesheet" href="index.cgi?asset=style.css&amp;v=4000"></head><body class="{kind}"><header><a class="brand" href="index.cgi"><span class="brand-icon">↗</span> Společný rozpočet</a><nav aria-label="Hlavní navigace"><a href="index.cgi">Hlasování</a><a href="results.cgi">Výsledky</a><a href="admin.cgi">Správa</a></nav></header><main>{body}</main><footer>Participativní rozpočet <span>Společně rozhodujeme o tom, co má smysl.</span></footer><script nonce="{SCRIPT_NONCE}">{script}</script></body></html>'''
 
 
 def hidden(name, value):
@@ -108,7 +110,7 @@ def vote_page(data, voter, csrf):
     projects = ''
     for i, item in enumerate(data['items']):
         projects += f'''<article class="project panel"><div class="project-top"><span class="project-number">{i+1:02}</span><label for="item-{i}">{escape(item)}</label><output for="item-{i}" id="value-{i}">0 <small>mil. EUR</small></output></div><input class="amount-number" type="number" min="0" max="{BUDGET}" step="1" value="0" data-index="{i}" aria-label="{escape(item)} – částka v milionech EUR"><input type="range" id="item-{i}" name="amount-{i}" min="0" max="{BUDGET}" step="1" value="0" aria-describedby="range-help"><div class="range-labels"><span>0 EUR</span><span>4 000 mil. EUR</span></div></article>'''
-    return intro + f'''<form id="vote-form" data-budget="{BUDGET}" class="vote-layout" action="api.cgi" method="post">{hidden('csrf', csrf)}{hidden('revision', data['revision'])}<section class="projects"><div class="section-heading"><h2>Na čem vám záleží?</h2><span>{len(data['items'])} projektů</span></div>{projects}<p class="hint" id="range-help">Každý krok představuje 1 milion EUR. Posuňte jezdec nebo použijte šipky na klávesnici.</p></section><aside class="panel budget"><p class="eyebrow">VÁŠ ROZPOČET</p><div class="budget-amount">4 000 000 000 <span>EUR</span></div><div class="budget-track"><div id="budget-fill"></div></div><div class="budget-line"><span>Rozděleno</span><strong id="allocated">0 mil. EUR</strong></div><div class="budget-line remaining"><span>Zbývá rozdělit</span><strong id="remaining">4 000 mil. EUR</strong></div><p id="budget-status" role="status" aria-live="polite">Rozdělte ještě 4 000 mil. EUR.</p><button type="submit" id="submit-vote" disabled>Odeslat můj hlas ↗</button><p class="hint">Hlas lze z tohoto prohlížeče odevzdat jednou za kolo.</p><p id="vote-error" class="error" role="alert"></p></aside></form>'''
+    return intro + f'''<p id="script-warning" class="notice error" role="alert">Načítám ovládání hlasování. Pokud tato zpráva nezmizí, JavaScript se nespustil. Zkuste úplné obnovení stránky.</p><form id="vote-form" data-budget="{BUDGET}" class="vote-layout" action="api.cgi" method="post">{hidden('csrf', csrf)}{hidden('revision', data['revision'])}<section class="projects"><div class="section-heading"><h2>Na čem vám záleží?</h2><span>{len(data['items'])} projektů</span></div>{projects}<p class="hint" id="range-help">Každý krok představuje 1 milion EUR. Posuňte jezdec nebo použijte šipky na klávesnici.</p></section><aside class="panel budget"><p class="eyebrow">VÁŠ ROZPOČET</p><div class="budget-amount">4 000 000 000 <span>EUR</span></div><div class="budget-track"><div id="budget-fill"></div></div><div class="budget-line"><span>Rozděleno</span><strong id="allocated">0 mil. EUR</strong></div><div class="budget-line remaining"><span>Zbývá rozdělit</span><strong id="remaining">4 000 mil. EUR</strong></div><p id="budget-status" role="status" aria-live="polite">Rozdělte ještě 4 000 mil. EUR.</p><button type="submit" id="submit-vote" disabled>Odeslat můj hlas ↗</button><p class="hint">Hlas lze z tohoto prohlížeče odevzdat jednou za kolo.</p><p id="vote-error" class="error" role="alert"></p></aside></form>'''
 
 
 def results_page():
@@ -253,7 +255,7 @@ def run(route):
         status = '503 Service Unavailable'
         message = 'Při zpracování požadavku nastala chyba. Podrobnosti najde správce v chybovém logu webserveru (Budget CGI error).'
         body = json.dumps({'error': message}, ensure_ascii=False) if route == 'api' else page('Nedostupné', f'<p class="notice error">{message}</p>')
-    headers.extend([('Status', status), ('Content-Type', mime + '; charset=utf-8'), ('Cache-Control', 'no-store'), ('X-Content-Type-Options', 'nosniff'), ('Referrer-Policy', 'same-origin'), ('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")])
+    headers.extend([('Status', status), ('Content-Type', mime + '; charset=utf-8'), ('Cache-Control', 'no-store'), ('X-Content-Type-Options', 'nosniff'), ('Referrer-Policy', 'same-origin'), ('Content-Security-Policy', f"default-src 'self'; script-src 'nonce-{SCRIPT_NONCE}'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")])
     output = ''.join(f'{key}: {value}\r\n' for key, value in headers) + '\r\n' + body
     sys.stdout.buffer.write(output.encode('utf-8'))
 
@@ -273,5 +275,5 @@ def serve_asset(filename=None):
             status, mime = '200 OK', allowed[filename]
         except OSError:
             status, mime, body = '503 Service Unavailable', 'text/plain', b'Asset unavailable'
-    headers = f'Status: {status}\r\nContent-Type: {mime}; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-cache\r\n\r\n'
+    headers = f'Status: {status}\r\nContent-Type: {mime}; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\n\r\n'
     sys.stdout.buffer.write(headers.encode('ascii') + body)

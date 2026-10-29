@@ -116,6 +116,17 @@ class AppTests(unittest.TestCase):
         headers, _ = self.request('index', query='asset=../storage/config.json')
         self.assertIn('404 Not Found', headers)
 
+    def test_script_is_embedded_and_allowed_by_per_response_nonce(self):
+        self.login_and_projects()
+        headers, body = self.request('index')
+        nonce = re.search(r'<script nonce="([^"]+)">', body)[1]
+        self.assertIn("script-src 'nonce-" + nonce + "'", headers)
+        self.assertNotIn('<script src=', body)
+        self.assertIn("document.querySelector('#vote-form')", body)
+        next_headers, next_body = self.request('index')
+        self.assertNotIn('nonce="' + nonce + '"', next_body)
+        self.assertIn('id="script-warning"', body)
+
     def test_million_precision_and_budget_limits(self):
         self.login_and_projects()
         cookie, fields = self.ballot()
